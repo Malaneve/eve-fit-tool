@@ -22,6 +22,7 @@ from evefit_core.storage import load_fits, save_fits
 from evefit_core.skills import load_skill_profiles
 
 from .add_fit_dialog import AddFitDialog
+from .manage_profiles_dialog import ManageProfilesDialog
 
 
 class MainWindow(QMainWindow):
@@ -57,7 +58,7 @@ class MainWindow(QMainWindow):
                 ),
             ]
 
-        # This will hold the currently filtered list
+        # Filtered list for search
         self.filtered_fits = list(self.fits)
 
         self._build_ui()
@@ -96,6 +97,11 @@ class MainWindow(QMainWindow):
         self.profile_combo.currentIndexChanged.connect(self._on_profile_changed)
         toolbar.addWidget(self.profile_combo)
 
+        # Manage profiles
+        action_manage_profiles = QAction("Manage profiles", self)
+        action_manage_profiles.triggered.connect(self._on_manage_profiles)
+        toolbar.addAction(action_manage_profiles)
+
         # Search bar
         toolbar.addSeparator()
         toolbar.addWidget(QLabel(" Search: "))
@@ -133,7 +139,7 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(central)
 
     # -------------------------
-    # Skill profile change
+    # Skill profile handling
     # -------------------------
     def _on_profile_changed(self, index: int):
         if index < 0:
@@ -143,10 +149,37 @@ class MainWindow(QMainWindow):
             self.active_skill_profile = profile
             self.label_profile.setText(f"Profile: {profile.name}")
 
-            # Re-evaluate the currently selected fit, if any
             current = self.fit_list.currentItem()
             if current is not None:
                 self._on_fit_selected(current, None)
+
+    def _reload_skill_profiles(self):
+        current_name = self.active_skill_profile.name if self.active_skill_profile else None
+
+        self.skill_profiles = load_skill_profiles()
+        if not self.skill_profiles:
+            self.active_skill_profile = SkillProfile(name="No skills (dummy)", skills={})
+            self.skill_profiles = [self.active_skill_profile]
+
+        self.profile_combo.blockSignals(True)
+        self.profile_combo.clear()
+        selected_index = 0
+
+        for i, profile in enumerate(self.skill_profiles):
+            self.profile_combo.addItem(profile.name, profile)
+            if profile.name == current_name:
+                selected_index = i
+
+        self.profile_combo.setCurrentIndex(selected_index)
+        self.profile_combo.blockSignals(False)
+
+        self.active_skill_profile = self.skill_profiles[selected_index]
+        self.label_profile.setText(f"Profile: {self.active_skill_profile.name}")
+
+    def _on_manage_profiles(self):
+        dlg = ManageProfilesDialog(self)
+        if dlg.exec():
+            self._reload_skill_profiles()
 
     # -------------------------
     # Filtering
@@ -213,7 +246,6 @@ class MainWindow(QMainWindow):
         if updated_fit is None:
             return
 
-        # Replace in the main list
         for idx, f in enumerate(self.fits):
             if f is fit or f.id == fit.id:
                 self.fits[idx] = updated_fit
@@ -221,8 +253,6 @@ class MainWindow(QMainWindow):
 
         save_fits(self.fits)
         self._refresh_filtered_fits()
-
-        # Try to re-select the updated fit
         self._select_fit_by_id(updated_fit.id)
 
     # -------------------------
@@ -246,21 +276,15 @@ class MainWindow(QMainWindow):
         if reply != QMessageBox.Yes:
             return
 
-        # Remove from main list
         self.fits = [f for f in self.fits if f is not fit and f.id != fit.id]
         save_fits(self.fits)
 
-        # Refresh filter + list
         self._refresh_filtered_fits()
 
-        # Clear details panel
         self.label_title.setText("Select a fit")
         self.label_stats.setText("(stats will appear here)")
 
     def _select_fit_by_id(self, fit_id: str):
-        """
-        Try to select a fit in the list by its id.
-        """
         for i in range(self.fit_list.count()):
             item = self.fit_list.item(i)
             fit = item.data(Qt.UserRole)
@@ -294,9 +318,9 @@ class MainWindow(QMainWindow):
 
         if stats.resist_profile:
             lines.append("")
-        lines.append("Resists:")
-        for dmg, val in stats.resist_profile.items():
-            lines.append(f"  {dmg}: {val:.1f}%")
+            lines.append("Resists:")
+            for dmg, val in stats.resist_profile.items():
+                lines.append(f"  {dmg}: {val:.1f}%")
 
         if stats.misc:
             lines.append("")
